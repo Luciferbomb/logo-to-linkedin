@@ -1,4 +1,3 @@
-
 import React, { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { combineImages, createHeadshotVariant } from '../utils/imageUtils';
@@ -52,8 +51,17 @@ const ImageProcessor: React.FC<ImageProcessorProps> = ({
       // Update progress to 30%
       setProgress(30);
       
-      // Generate profile pictures with different styles
-      const profileVariants = ['professional', 'artistic', 'minimal', 'bold'] as const;
+      // Generate profile pictures with different styles - now with more variants
+      const profileVariants = [
+        'professional', 
+        'artistic', 
+        'minimal', 
+        'bold',
+        'gradient',
+        'duotone',
+        'vintage',
+        'monochrome'
+      ] as const;
       
       // Process images in parallel
       const profilePromises = profileVariants.map(async (variant, index) => {
@@ -210,7 +218,7 @@ const ImageProcessor: React.FC<ImageProcessorProps> = ({
             <div className="mt-6">
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span>Analyzing images</span>
+                  <span>Analyzing and cropping images</span>
                   <span className="text-primary">{progress > 30 ? 'Done' : 'Processing...'}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
