@@ -1,3 +1,4 @@
+
 import React, { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { combineImages, createHeadshotVariant } from '../utils/imageUtils';
@@ -172,23 +173,70 @@ const ImageProcessor: React.FC<ImageProcessorProps> = ({
             
             logoCtx.drawImage(logoImg, 0, 0);
             
-            // Simple background removal for logo
+            // Improved background removal for logo
             const logoData = logoCtx.getImageData(0, 0, logoCanvas.width, logoCanvas.height);
             const data = logoData.data;
             
+            // Find dominant background color (likely white or light color)
+            let avgR = 0, avgG = 0, avgB = 0, count = 0;
+            
+            // Sample edges to determine background color
+            for (let x = 0; x < 10; x++) {
+              for (let y = 0; y < logoCanvas.height; y += 5) {
+                const idx = (y * logoCanvas.width + x) * 4;
+                avgR += data[idx];
+                avgG += data[idx + 1];
+                avgB += data[idx + 2];
+                count++;
+              }
+              
+              for (let y = 0; y < logoCanvas.height; y += 5) {
+                const x = logoCanvas.width - 1 - (y % 10);
+                const idx = (y * logoCanvas.width + x) * 4;
+                avgR += data[idx];
+                avgG += data[idx + 1];
+                avgB += data[idx + 2];
+                count++;
+              }
+            }
+            
+            avgR = Math.round(avgR / count);
+            avgG = Math.round(avgG / count);
+            avgB = Math.round(avgB / count);
+            
+            // Remove background based on similarity to detected color
             for (let i = 0; i < data.length; i += 4) {
-              const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
-              if (brightness > 240) {
-                data[i + 3] = 0;
+              const r = data[i];
+              const g = data[i + 1];
+              const b = data[i + 2];
+              
+              // Calculate color distance from background
+              const distance = Math.sqrt(
+                Math.pow(r - avgR, 2) + 
+                Math.pow(g - avgG, 2) + 
+                Math.pow(b - avgB, 2)
+              );
+              
+              // Make background transparent
+              if (distance < 40) {
+                data[i + 3] = 0; // Fully transparent
+              } else if (distance < 80) {
+                data[i + 3] = Math.min(255, Math.round((distance / 40) * 255)); // Partial transparency
               }
             }
             
             logoCtx.putImageData(logoData, 0, 0);
           }
           
-          // Add company logo
+          // Add company logo - use drawCenteredImage to prevent stretching
           const logoSize = 160;
-          ctx.drawImage(logoCanvas, canvas.width - logoSize - 100, canvas.height / 2 - logoSize / 2, logoSize, logoSize);
+          drawCenteredImage(
+            logoCanvas, 
+            canvas.width - logoSize - 100, 
+            canvas.height / 2 - logoSize / 2, 
+            logoSize, 
+            logoSize
+          );
           
           // Add text
           ctx.font = 'bold 40px Arial';

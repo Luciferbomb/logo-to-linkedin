@@ -1,3 +1,4 @@
+
 /**
  * Image manipulation utilities for headshot generation
  */
@@ -24,8 +25,8 @@ export const combineImages = async (
     createImageFromFile(logo)
   ]);
 
-  // Process logo to remove background
-  const processedLogoImg = await removeBackground(logoImg);
+  // Process logo to remove background with improved technique
+  const processedLogoImg = await removeBackgroundAdvanced(logoImg);
 
   if (type === 'profile') {
     // For profile pictures: Create professional headshot with logo in corner
@@ -46,7 +47,9 @@ export const combineImages = async (
     // Add logo in bottom right with slight transparency
     const logoSize = 100;
     ctx.globalAlpha = 0.8;
-    ctx.drawImage(processedLogoImg, 400 - logoSize, 400 - logoSize, logoSize, logoSize);
+    
+    // Use proper drawing with aspect ratio preservation for logo
+    drawImageProp(ctx, processedLogoImg, 400 - logoSize, 400 - logoSize, logoSize, logoSize);
     ctx.globalAlpha = 1.0;
     
     // Add subtle vignette effect
@@ -82,12 +85,12 @@ export const combineImages = async (
     drawImageProp(ctx, profileImg, photoX, photoY, photoWidth, photoHeight);
     ctx.restore();
     
-    // Add logo to right side
+    // Add logo to right side with proper aspect ratio
     const logoWidth = 200;
     const logoHeight = 200;
     const logoX = canvas.width - logoWidth - 100;
     const logoY = (canvas.height - logoHeight) / 2;
-    ctx.drawImage(processedLogoImg, logoX, logoY, logoWidth, logoHeight);
+    drawImageProp(ctx, processedLogoImg, logoX, logoY, logoWidth, logoHeight);
     
     // Add separator line
     ctx.beginPath();
@@ -175,7 +178,188 @@ const drawImageProp = (
 };
 
 /**
+ * Improved background removal for logos using color detection and edge preservation
+ */
+const removeBackgroundAdvanced = async (img: HTMLImageElement): Promise<HTMLImageElement> => {
+  // Create a canvas to process the image
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  
+  if (!ctx) {
+    throw new Error('Unable to create canvas context');
+  }
+  
+  // Set canvas dimensions to match image
+  canvas.width = img.width;
+  canvas.height = img.height;
+  
+  // Draw the original image
+  ctx.drawImage(img, 0, 0);
+  
+  // Get the image data
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  
+  // Edge detection pre-processing - helps preserve logo edges
+  const edges = detectEdges(data, canvas.width, canvas.height);
+  
+  // Find the most common background color (assuming background is consistent)
+  const backgroundColor = findDominantBackgroundColor(data);
+  
+  // Color similarity threshold (higher = more aggressive removal)
+  const threshold = 30; // Adjusted for better results
+  
+  // Process each pixel
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    
+    // Calculate color similarity to background
+    const colorDistance = Math.sqrt(
+      Math.pow(backgroundColor.r - r, 2) +
+      Math.pow(backgroundColor.g - g, 2) +
+      Math.pow(backgroundColor.b - b, 2)
+    );
+    
+    // If close to background color and not an edge, make transparent
+    if (colorDistance < threshold && !edges[i/4]) {
+      data[i + 3] = 0; // Fully transparent
+    }
+    // For colors slightly similar to background, apply partial transparency
+    else if (colorDistance < threshold * 1.5 && !edges[i/4]) {
+      data[i + 3] = Math.min(255, Math.round((colorDistance / threshold) * 255));
+    }
+  }
+  
+  // Put the modified image data back
+  ctx.putImageData(imageData, 0, 0);
+  
+  // Create a new image from the canvas
+  return new Promise((resolve) => {
+    const newImg = new Image();
+    newImg.onload = () => resolve(newImg);
+    newImg.src = canvas.toDataURL('image/png');
+  });
+};
+
+/**
+ * Detect edges in an image to help with background removal
+ */
+const detectEdges = (data: Uint8ClampedArray, width: number, height: number): boolean[] => {
+  const edges = new Array(data.length / 4).fill(false);
+  const sobelThreshold = 30; // Edge detection sensitivity
+  
+  // Simple Sobel edge detection
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const idx = (y * width + x) * 4;
+      
+      // Get surrounding pixels (for grayscale values)
+      const tl = (data[((y-1) * width + (x-1)) * 4] + 
+                 data[((y-1) * width + (x-1)) * 4 + 1] + 
+                 data[((y-1) * width + (x-1)) * 4 + 2]) / 3;
+      
+      const t = (data[((y-1) * width + x) * 4] + 
+                data[((y-1) * width + x) * 4 + 1] + 
+                data[((y-1) * width + x) * 4 + 2]) / 3;
+      
+      const tr = (data[((y-1) * width + (x+1)) * 4] + 
+                 data[((y-1) * width + (x+1)) * 4 + 1] + 
+                 data[((y-1) * width + (x+1)) * 4 + 2]) / 3;
+      
+      const l = (data[(y * width + (x-1)) * 4] + 
+                data[(y * width + (x-1)) * 4 + 1] + 
+                data[(y * width + (x-1)) * 4 + 2]) / 3;
+      
+      const r = (data[(y * width + (x+1)) * 4] + 
+                data[(y * width + (x+1)) * 4 + 1] + 
+                data[(y * width + (x+1)) * 4 + 2]) / 3;
+      
+      const bl = (data[((y+1) * width + (x-1)) * 4] + 
+                 data[((y+1) * width + (x-1)) * 4 + 1] + 
+                 data[((y+1) * width + (x-1)) * 4 + 2]) / 3;
+      
+      const b = (data[((y+1) * width + x) * 4] + 
+                data[((y+1) * width + x) * 4 + 1] + 
+                data[((y+1) * width + x) * 4 + 2]) / 3;
+      
+      const br = (data[((y+1) * width + (x+1)) * 4] + 
+                 data[((y+1) * width + (x+1)) * 4 + 1] + 
+                 data[((y+1) * width + (x+1)) * 4 + 2]) / 3;
+      
+      // Sobel operator for horizontal and vertical gradients
+      const gx = -tl - 2*l - bl + tr + 2*r + br;
+      const gy = -tl - 2*t - tr + bl + 2*b + br;
+      
+      // Gradient magnitude
+      const g = Math.sqrt(gx*gx + gy*gy);
+      
+      // Mark as edge if gradient is above threshold
+      if (g > sobelThreshold) {
+        edges[y * width + x] = true;
+      }
+    }
+  }
+  
+  return edges;
+};
+
+/**
+ * Find the most common color in the image borders (likely background)
+ */
+const findDominantBackgroundColor = (data: Uint8ClampedArray): { r: number, g: number, b: number } => {
+  const colorCounts: Record<string, { count: number, r: number, g: number, b: number }> = {};
+  const pixelCount = data.length / 4;
+  const width = Math.sqrt(pixelCount); // Approximate width assuming square image
+  
+  // Sample pixels from the edge of the image
+  for (let i = 0; i < data.length; i += 4) {
+    const pixelIndex = i / 4;
+    const x = pixelIndex % width;
+    const y = Math.floor(pixelIndex / width);
+    
+    // Only sample from edges (10% inward)
+    const edgeThreshold = width * 0.1;
+    if (x < edgeThreshold || x > width - edgeThreshold || 
+        y < edgeThreshold || y > width - edgeThreshold) {
+      
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      
+      // Group similar colors (reduce precision to group similar shades)
+      const colorKey = `${Math.floor(r/10)},${Math.floor(g/10)},${Math.floor(b/10)}`;
+      
+      if (!colorCounts[colorKey]) {
+        colorCounts[colorKey] = { count: 0, r, g, b };
+      }
+      
+      colorCounts[colorKey].count++;
+    }
+  }
+  
+  // Find the most common color
+  let maxCount = 0;
+  let dominantColor = { r: 255, g: 255, b: 255 }; // Default to white
+  
+  for (const key in colorCounts) {
+    if (colorCounts[key].count > maxCount) {
+      maxCount = colorCounts[key].count;
+      dominantColor = {
+        r: colorCounts[key].r,
+        g: colorCounts[key].g,
+        b: colorCounts[key].b
+      };
+    }
+  }
+  
+  return dominantColor;
+};
+
+/**
  * Removes the background from an image using simple transparency detection
+ * (kept for compatibility)
  */
 const removeBackground = async (img: HTMLImageElement): Promise<HTMLImageElement> => {
   // Create a canvas to process the image
@@ -291,8 +475,8 @@ export const createHeadshotVariant = async (
     createImageFromFile(logo)
   ]);
 
-  // Process logo to remove background
-  const processedLogoImg = await removeBackground(logoImg);
+  // Process logo to remove background with improved technique
+  const processedLogoImg = await removeBackgroundAdvanced(logoImg);
 
   // Set canvas dimensions
   canvas.width = 500;
@@ -312,7 +496,7 @@ export const createHeadshotVariant = async (
       // Add logo as small watermark
       const logoSize = 80;
       ctx.globalAlpha = 0.7;
-      ctx.drawImage(processedLogoImg, 400 - logoSize, 400 - logoSize, logoSize, logoSize);
+      drawImageProp(ctx, processedLogoImg, 400 - logoSize, 400 - logoSize, logoSize, logoSize);
       ctx.globalAlpha = 1.0;
       
       // Add subtle vignette
@@ -335,7 +519,7 @@ export const createHeadshotVariant = async (
       // Add logo with blend mode
       ctx.globalCompositeOperation = 'overlay';
       ctx.globalAlpha = 0.4;
-      ctx.drawImage(processedLogoImg, 150, 150, 200, 200);
+      drawImageProp(ctx, processedLogoImg, 150, 150, 200, 200);
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
       break;
@@ -358,7 +542,7 @@ export const createHeadshotVariant = async (
       ctx.stroke();
       
       // Add tiny logo in corner
-      ctx.drawImage(processedLogoImg, 400, 400, 60, 60);
+      drawImageProp(ctx, processedLogoImg, 400, 400, 60, 60);
       break;
       
     case 'bold':
@@ -389,7 +573,7 @@ export const createHeadshotVariant = async (
       
       // Add logo to bottom triangle
       ctx.globalCompositeOperation = 'screen';
-      ctx.drawImage(processedLogoImg, 150, 250, 200, 200);
+      drawImageProp(ctx, processedLogoImg, 150, 250, 200, 200);
       ctx.globalCompositeOperation = 'source-over';
       ctx.restore();
       break;
@@ -419,7 +603,7 @@ export const createHeadshotVariant = async (
       
       // Add small logo
       const logoSizeGradient = 60;
-      ctx.drawImage(processedLogoImg, 250 - logoSizeGradient/2, 380 - logoSizeGradient/2, logoSizeGradient, logoSizeGradient);
+      drawImageProp(ctx, processedLogoImg, 250 - logoSizeGradient/2, 380 - logoSizeGradient/2, logoSizeGradient, logoSizeGradient);
       break;
       
     case 'duotone':
@@ -449,7 +633,7 @@ export const createHeadshotVariant = async (
       // Add logo watermark
       ctx.globalAlpha = 0.7;
       ctx.globalCompositeOperation = 'lighten';
-      ctx.drawImage(processedLogoImg, 350, 350, 120, 120);
+      drawImageProp(ctx, processedLogoImg, 350, 350, 120, 120);
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
       break;
@@ -505,7 +689,7 @@ export const createHeadshotVariant = async (
       ctx.putImageData(vintageData, 0, 0);
       
       // Add small logo
-      ctx.drawImage(processedLogoImg, 40, 430, 50, 50);
+      drawImageProp(ctx, processedLogoImg, 40, 430, 50, 50);
       break;
   }
   
