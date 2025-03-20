@@ -1,4 +1,3 @@
-
 /**
  * Image manipulation utilities for headshot generation
  */
@@ -25,6 +24,9 @@ export const combineImages = async (
     createImageFromFile(logo)
   ]);
 
+  // Process logo to remove background
+  const processedLogoImg = await removeBackground(logoImg);
+
   if (type === 'profile') {
     // For profile pictures: Create professional headshot with logo in corner
     canvas.width = 500;
@@ -37,23 +39,14 @@ export const combineImages = async (
     ctx.arc(250, 250, 250, 0, Math.PI * 2);
     ctx.clip();
     
-    // Properly size and position the profile image to avoid stretching
-    const size = Math.min(profileImg.width, profileImg.height);
-    const offsetX = (profileImg.width - size) / 2;
-    const offsetY = (profileImg.height - size) / 2;
-    
-    // Draw the profile image centered and cropped to avoid stretching
-    ctx.drawImage(
-      profileImg, 
-      offsetX, offsetY, size, size, // Source rectangle
-      0, 0, 500, 500               // Destination rectangle
-    );
+    // Center and crop the profile image to avoid stretching
+    drawImageProp(ctx, profileImg, 0, 0, 500, 500);
     ctx.restore();
     
     // Add logo in bottom right with slight transparency
     const logoSize = 100;
     ctx.globalAlpha = 0.8;
-    ctx.drawImage(logoImg, 400 - logoSize, 400 - logoSize, logoSize, logoSize);
+    ctx.drawImage(processedLogoImg, 400 - logoSize, 400 - logoSize, logoSize, logoSize);
     ctx.globalAlpha = 1.0;
     
     // Add subtle vignette effect
@@ -85,16 +78,8 @@ export const combineImages = async (
     ctx.arc(photoX + photoWidth/2, photoY + photoHeight/2, photoWidth/2, 0, Math.PI * 2);
     ctx.clip();
     
-    // Properly size and position the profile image
-    const size = Math.min(profileImg.width, profileImg.height);
-    const offsetX = (profileImg.width - size) / 2;
-    const offsetY = (profileImg.height - size) / 2;
-    
-    ctx.drawImage(
-      profileImg,
-      offsetX, offsetY, size, size, // Source rectangle
-      photoX, photoY, photoWidth, photoHeight // Destination rectangle
-    );
+    // Use drawImageProp to prevent stretching
+    drawImageProp(ctx, profileImg, photoX, photoY, photoWidth, photoHeight);
     ctx.restore();
     
     // Add logo to right side
@@ -102,7 +87,7 @@ export const combineImages = async (
     const logoHeight = 200;
     const logoX = canvas.width - logoWidth - 100;
     const logoY = (canvas.height - logoHeight) / 2;
-    ctx.drawImage(logoImg, logoX, logoY, logoWidth, logoHeight);
+    ctx.drawImage(processedLogoImg, logoX, logoY, logoWidth, logoHeight);
     
     // Add separator line
     ctx.beginPath();
@@ -132,6 +117,115 @@ const createImageFromFile = (file: File): Promise<HTMLImageElement> => {
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('Failed to load image'));
     img.src = URL.createObjectURL(file);
+  });
+};
+
+/**
+ * Properly draws an image maintaining aspect ratio and preventing stretching
+ * This is a helper function to avoid stretched images
+ */
+const drawImageProp = (
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  offsetX = 0.5,
+  offsetY = 0.5
+) => {
+  // Default offset is center
+  if (offsetX === undefined) offsetX = 0.5;
+  if (offsetY === undefined) offsetY = 0.5;
+
+  // Keep bounds [0.0, 1.0]
+  if (offsetX < 0) offsetX = 0;
+  if (offsetY < 0) offsetY = 0;
+  if (offsetX > 1) offsetX = 1;
+  if (offsetY > 1) offsetY = 1;
+
+  // Calculate source dimensions and positions to avoid stretching
+  let iw = img.width;
+  let ih = img.height;
+  let r = Math.min(w / iw, h / ih);
+  let nw = iw * r;   // New prop. width
+  let nh = ih * r;   // New prop. height
+  let cx, cy, cw, ch, ar = 1;
+
+  // Decide which gap to fill    
+  if (nw < w) ar = w / nw;                             
+  if (Math.abs(ar - 1) < 1e-14 && nh < h) ar = h / nh;  // updated
+  nw *= ar;
+  nh *= ar;
+
+  // Calc source rectangle
+  cw = iw / (nw / w);
+  ch = ih / (nh / h);
+  cx = (iw - cw) * offsetX;
+  cy = (ih - ch) * offsetY;
+
+  // Make sure source rectangle is valid
+  if (cx < 0) cx = 0;
+  if (cy < 0) cy = 0;
+  if (cw > iw) cw = iw;
+  if (ch > ih) ch = ih;
+
+  // Draw image
+  ctx.drawImage(img, cx, cy, cw, ch, x, y, w, h);
+};
+
+/**
+ * Removes the background from an image using simple transparency detection
+ */
+const removeBackground = async (img: HTMLImageElement): Promise<HTMLImageElement> => {
+  // Create a canvas to process the image
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  
+  if (!ctx) {
+    throw new Error('Unable to create canvas context');
+  }
+  
+  // Set canvas dimensions
+  canvas.width = img.width;
+  canvas.height = img.height;
+  
+  // Draw the original image
+  ctx.drawImage(img, 0, 0);
+  
+  // Get the image data
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  
+  // Simple background removal by making white/light backgrounds transparent
+  // This is a simplified approach - more advanced methods would use ML models
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    
+    // Calculate brightness
+    const brightness = (r + g + b) / 3;
+    
+    // Make bright/white areas transparent
+    if (brightness > 240) {
+      data[i + 3] = 0; // Set alpha to 0 (transparent)
+    }
+    
+    // Partial transparency for lighter areas
+    else if (brightness > 220) {
+      data[i + 3] = 128; // Semi-transparent
+    }
+  }
+  
+  // Put the modified image data back
+  ctx.putImageData(imageData, 0, 0);
+  
+  // Create a new image from the canvas
+  return new Promise((resolve) => {
+    const newImg = new Image();
+    newImg.onload = () => resolve(newImg);
+    newImg.src = canvas.toDataURL('image/png');
   });
 };
 
@@ -182,7 +276,7 @@ const enhanceColors = (ctx: CanvasRenderingContext2D, width: number, height: num
 export const createHeadshotVariant = async (
   profilePhoto: File,
   logo: File,
-  variant: 'professional' | 'artistic' | 'minimal' | 'bold' | 'gradient' | 'duotone' | 'vintage' | 'monochrome'
+  variant: 'professional' | 'artistic' | 'minimal' | 'bold' | 'gradient' | 'duotone' | 'vintage'
 ): Promise<string> => {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
@@ -197,14 +291,12 @@ export const createHeadshotVariant = async (
     createImageFromFile(logo)
   ]);
 
+  // Process logo to remove background
+  const processedLogoImg = await removeBackground(logoImg);
+
   // Set canvas dimensions
   canvas.width = 500;
   canvas.height = 500;
-  
-  // Properly size and position the profile image to avoid stretching
-  const size = Math.min(profileImg.width, profileImg.height);
-  const offsetX = (profileImg.width - size) / 2;
-  const offsetY = (profileImg.height - size) / 2;
   
   // Apply different styles based on variant
   switch (variant) {
@@ -214,13 +306,13 @@ export const createHeadshotVariant = async (
       ctx.beginPath();
       ctx.arc(250, 250, 250, 0, Math.PI * 2);
       ctx.clip();
-      ctx.drawImage(profileImg, offsetX, offsetY, size, size, 0, 0, 500, 500);
+      drawImageProp(ctx, profileImg, 0, 0, 500, 500);
       ctx.restore();
       
       // Add logo as small watermark
       const logoSize = 80;
       ctx.globalAlpha = 0.7;
-      ctx.drawImage(logoImg, 400 - logoSize, 400 - logoSize, logoSize, logoSize);
+      ctx.drawImage(processedLogoImg, 400 - logoSize, 400 - logoSize, logoSize, logoSize);
       ctx.globalAlpha = 1.0;
       
       // Add subtle vignette
@@ -233,7 +325,7 @@ export const createHeadshotVariant = async (
       ctx.beginPath();
       ctx.arc(250, 250, 250, 0, Math.PI * 2);
       ctx.clip();
-      ctx.drawImage(profileImg, offsetX, offsetY, size, size, 0, 0, 500, 500);
+      drawImageProp(ctx, profileImg, 0, 0, 500, 500);
       ctx.restore();
       
       // Add color overlay
@@ -243,7 +335,7 @@ export const createHeadshotVariant = async (
       // Add logo with blend mode
       ctx.globalCompositeOperation = 'overlay';
       ctx.globalAlpha = 0.4;
-      ctx.drawImage(logoImg, 150, 150, 200, 200);
+      ctx.drawImage(processedLogoImg, 150, 150, 200, 200);
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
       break;
@@ -255,7 +347,7 @@ export const createHeadshotVariant = async (
       ctx.beginPath();
       ctx.arc(250, 250, 240, 0, Math.PI * 2);
       ctx.clip();
-      ctx.drawImage(profileImg, offsetX, offsetY, size, size, 0, 0, 500, 500);
+      drawImageProp(ctx, profileImg, 0, 0, 500, 500);
       ctx.restore();
       
       // Draw border
@@ -266,7 +358,7 @@ export const createHeadshotVariant = async (
       ctx.stroke();
       
       // Add tiny logo in corner
-      ctx.drawImage(logoImg, 400, 400, 60, 60);
+      ctx.drawImage(processedLogoImg, 400, 400, 60, 60);
       break;
       
     case 'bold':
@@ -279,7 +371,7 @@ export const createHeadshotVariant = async (
       ctx.lineTo(500, 500);
       ctx.closePath();
       ctx.clip();
-      ctx.drawImage(profileImg, offsetX, offsetY, size, size, 0, 0, 500, 500);
+      drawImageProp(ctx, profileImg, 0, 0, 500, 500);
       ctx.restore();
       
       // Bottom triangle with logo
@@ -297,7 +389,7 @@ export const createHeadshotVariant = async (
       
       // Add logo to bottom triangle
       ctx.globalCompositeOperation = 'screen';
-      ctx.drawImage(logoImg, 150, 250, 200, 200);
+      ctx.drawImage(processedLogoImg, 150, 250, 200, 200);
       ctx.globalCompositeOperation = 'source-over';
       ctx.restore();
       break;
@@ -316,7 +408,7 @@ export const createHeadshotVariant = async (
       ctx.beginPath();
       ctx.arc(250, 230, 180, 0, Math.PI * 2);
       ctx.clip();
-      ctx.drawImage(profileImg, offsetX, offsetY, size, size, 70, 50, 360, 360);
+      drawImageProp(ctx, profileImg, 70, 50, 360, 360);
       ctx.restore();
       
       // Add company name placeholder
@@ -327,7 +419,7 @@ export const createHeadshotVariant = async (
       
       // Add small logo
       const logoSizeGradient = 60;
-      ctx.drawImage(logoImg, 250 - logoSizeGradient/2, 380 - logoSizeGradient/2, logoSizeGradient, logoSizeGradient);
+      ctx.drawImage(processedLogoImg, 250 - logoSizeGradient/2, 380 - logoSizeGradient/2, logoSizeGradient, logoSizeGradient);
       break;
       
     case 'duotone':
@@ -336,7 +428,7 @@ export const createHeadshotVariant = async (
       ctx.beginPath();
       ctx.arc(250, 250, 250, 0, Math.PI * 2);
       ctx.clip();
-      ctx.drawImage(profileImg, offsetX, offsetY, size, size, 0, 0, 500, 500);
+      drawImageProp(ctx, profileImg, 0, 0, 500, 500);
       ctx.restore();
       
       // Apply duotone effect
@@ -357,7 +449,7 @@ export const createHeadshotVariant = async (
       // Add logo watermark
       ctx.globalAlpha = 0.7;
       ctx.globalCompositeOperation = 'lighten';
-      ctx.drawImage(logoImg, 350, 350, 120, 120);
+      ctx.drawImage(processedLogoImg, 350, 350, 120, 120);
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
       break;
@@ -394,7 +486,7 @@ export const createHeadshotVariant = async (
       ctx.beginPath();
       ctx.arc(250, 250, 170, 0, Math.PI * 2);
       ctx.clip();
-      ctx.drawImage(profileImg, offsetX, offsetY, size, size, 80, 80, 340, 340);
+      drawImageProp(ctx, profileImg, 80, 80, 340, 340);
       ctx.restore();
       
       // Apply sepia tone
@@ -413,44 +505,7 @@ export const createHeadshotVariant = async (
       ctx.putImageData(vintageData, 0, 0);
       
       // Add small logo
-      ctx.drawImage(logoImg, 40, 430, 50, 50);
-      break;
-      
-    case 'monochrome':
-      // High contrast black and white
-      ctx.save();
-      
-      // Create black background
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, 500, 500);
-      
-      // Draw profile with halftone-like effect
-      ctx.beginPath();
-      ctx.arc(250, 250, 230, 0, Math.PI * 2);
-      ctx.clip();
-      ctx.drawImage(profileImg, offsetX, offsetY, size, size, 20, 20, 460, 460);
-      
-      // Apply high contrast black and white effect
-      const monoData = ctx.getImageData(0, 0, 500, 500);
-      const monoPixels = monoData.data;
-      
-      for (let i = 0; i < monoPixels.length; i += 4) {
-        const brightness = (monoPixels[i] * 0.299) + (monoPixels[i + 1] * 0.587) + (monoPixels[i + 2] * 0.114);
-        
-        // High contrast threshold
-        const threshold = brightness > 140 ? 255 : 0;
-        monoPixels[i] = monoPixels[i + 1] = monoPixels[i + 2] = threshold;
-      }
-      
-      ctx.putImageData(monoData, 0, 0);
-      ctx.restore();
-      
-      // Add logo with inverse color effect
-      ctx.save();
-      ctx.globalCompositeOperation = 'difference';
-      const logoSizeMono = 100;
-      ctx.drawImage(logoImg, 500 - logoSizeMono - 20, 500 - logoSizeMono - 20, logoSizeMono, logoSizeMono);
-      ctx.restore();
+      ctx.drawImage(processedLogoImg, 40, 430, 50, 50);
       break;
   }
   
@@ -480,14 +535,8 @@ export const smartCropImage = async (
   canvas.width = targetWidth;
   canvas.height = targetHeight;
   
-  // Determine the best square crop (center-focused)
-  const size = Math.min(img.width, img.height);
-  const offsetX = (img.width - size) / 2;
-  const offsetY = (img.height - size) / 2;
-  
-  // Draw the cropped image onto the canvas
-  ctx.drawImage(img, offsetX, offsetY, size, size, 0, 0, targetWidth, targetHeight);
+  // Use the proper drawing function to prevent stretching
+  drawImageProp(ctx, img, 0, 0, targetWidth, targetHeight);
   
   return canvas.toDataURL('image/png');
 };
-

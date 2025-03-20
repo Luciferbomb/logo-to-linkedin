@@ -51,7 +51,7 @@ const ImageProcessor: React.FC<ImageProcessorProps> = ({
       // Update progress to 30%
       setProgress(30);
       
-      // Generate profile pictures with different styles - now with more variants
+      // Generate profile pictures with different styles - removed monochrome
       const profileVariants = [
         'professional', 
         'artistic', 
@@ -59,8 +59,7 @@ const ImageProcessor: React.FC<ImageProcessorProps> = ({
         'bold',
         'gradient',
         'duotone',
-        'vintage',
-        'monochrome'
+        'vintage'
       ] as const;
       
       // Process images in parallel
@@ -127,18 +126,69 @@ const ImageProcessor: React.FC<ImageProcessorProps> = ({
             img.src = URL.createObjectURL(logo);
           });
           
-          // Add a circular profile image
+          // Add a circular profile image - prevent stretching
           const profileSize = 250;
           ctx.save();
           ctx.beginPath();
           ctx.arc(250, canvas.height / 2, profileSize / 2, 0, Math.PI * 2);
           ctx.clip();
-          ctx.drawImage(profileImg, 250 - profileSize / 2, canvas.height / 2 - profileSize / 2, profileSize, profileSize);
+          
+          // Use drawImageProp equivalent function inline
+          const drawCenteredImage = (img: HTMLImageElement, x: number, y: number, w: number, h: number) => {
+            const imgRatio = img.width / img.height;
+            const containerRatio = w / h;
+            let drawWidth, drawHeight, offsetX, offsetY;
+            
+            if (imgRatio > containerRatio) {
+              drawHeight = h;
+              drawWidth = img.width * (h / img.height);
+              offsetX = (w - drawWidth) / 2;
+              offsetY = 0;
+            } else {
+              drawWidth = w;
+              drawHeight = img.height * (w / img.width);
+              offsetX = 0;
+              offsetY = (h - drawHeight) / 2;
+            }
+            
+            ctx.drawImage(img, x + offsetX, y + offsetY, drawWidth, drawHeight);
+          };
+          
+          drawCenteredImage(
+            profileImg, 
+            250 - profileSize / 2, 
+            canvas.height / 2 - profileSize / 2, 
+            profileSize, 
+            profileSize
+          );
           ctx.restore();
+          
+          // Process logo to remove background
+          const logoCanvas = document.createElement('canvas');
+          const logoCtx = logoCanvas.getContext('2d');
+          if (logoCtx) {
+            logoCanvas.width = logoImg.width;
+            logoCanvas.height = logoImg.height;
+            
+            logoCtx.drawImage(logoImg, 0, 0);
+            
+            // Simple background removal for logo
+            const logoData = logoCtx.getImageData(0, 0, logoCanvas.width, logoCanvas.height);
+            const data = logoData.data;
+            
+            for (let i = 0; i < data.length; i += 4) {
+              const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+              if (brightness > 240) {
+                data[i + 3] = 0;
+              }
+            }
+            
+            logoCtx.putImageData(logoData, 0, 0);
+          }
           
           // Add company logo
           const logoSize = 160;
-          ctx.drawImage(logoImg, canvas.width - logoSize - 100, canvas.height / 2 - logoSize / 2, logoSize, logoSize);
+          ctx.drawImage(logoCanvas, canvas.width - logoSize - 100, canvas.height / 2 - logoSize / 2, logoSize, logoSize);
           
           // Add text
           ctx.font = 'bold 40px Arial';
