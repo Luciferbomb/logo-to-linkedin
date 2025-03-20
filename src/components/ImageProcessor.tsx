@@ -1,6 +1,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { combineImages, createHeadshotVariant } from '../utils/imageUtils';
 
 export interface GeneratedImage {
   id: string;
@@ -26,7 +27,7 @@ const ImageProcessor: React.FC<ImageProcessorProps> = ({
 }) => {
   const [progress, setProgress] = useState(0);
 
-  // Mock image generation by simulating progress
+  // Generate images using our image processing utilities
   const generateImages = useCallback(async () => {
     if (!profilePhoto || !logo) {
       toast.error('Please upload both your profile photo and company logo');
@@ -37,52 +38,123 @@ const ImageProcessor: React.FC<ImageProcessorProps> = ({
     setProgress(0);
 
     try {
-      // Simulate processing time with a progress indicator
+      // Simulate processing with progress updates
       const progressInterval = setInterval(() => {
         setProgress(prev => {
-          const newProgress = prev + Math.random() * 15;
+          const newProgress = prev + Math.random() * 10;
           return newProgress > 95 ? 95 : newProgress;
         });
-      }, 500);
-
-      // Create object URLs for the uploaded files
-      const profileUrl = URL.createObjectURL(profilePhoto);
-      const logoUrl = URL.createObjectURL(logo);
-
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 3000));
-
-      // For this mockup, we'll just return the original images
-      // In a real app, these would be the processed images from your API
-      const generatedImages: GeneratedImage[] = [
-        {
-          id: 'profile-1',
-          url: profileUrl,
-          type: 'profile',
-          name: 'Professional Profile 1'
-        },
-        {
-          id: 'profile-2',
-          url: profileUrl,
-          type: 'profile',
-          name: 'Professional Profile 2'
-        },
-        {
-          id: 'banner-1',
-          url: logoUrl,
-          type: 'banner',
-          name: 'LinkedIn Banner 1'
-        },
-        {
-          id: 'banner-2',
-          url: logoUrl,
-          type: 'banner',
-          name: 'LinkedIn Banner 2'
+      }, 300);
+      
+      // Generate different image variations
+      const generatedImages: GeneratedImage[] = [];
+      
+      // Update progress to 30%
+      setProgress(30);
+      
+      // Generate profile pictures with different styles
+      const profileVariants = ['professional', 'artistic', 'minimal', 'bold'] as const;
+      
+      // Process images in parallel
+      const profilePromises = profileVariants.map(async (variant, index) => {
+        try {
+          const imageUrl = await createHeadshotVariant(profilePhoto, logo, variant);
+          return {
+            id: `profile-${index + 1}`,
+            url: imageUrl,
+            type: 'profile' as const,
+            name: `${variant.charAt(0).toUpperCase() + variant.slice(1)} Headshot`
+          };
+        } catch (error) {
+          console.error(`Error generating ${variant} profile:`, error);
+          toast.error(`Failed to generate ${variant} profile`);
+          return null;
         }
+      });
+      
+      // Generate banner images
+      setProgress(60);
+      
+      // Create two banner variations
+      const bannerPromises = [
+        combineImages(profilePhoto, logo, 'banner').then(url => ({
+          id: 'banner-1',
+          url,
+          type: 'banner' as const,
+          name: 'Professional LinkedIn Banner'
+        })),
+        // Create a second banner with a different style
+        (async () => {
+          // Create a canvas for the second banner style
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          
+          if (!ctx) {
+            throw new Error('Unable to create canvas context');
+          }
+          
+          // Set dimensions for LinkedIn banner
+          canvas.width = 1584;
+          canvas.height = 396;
+          
+          // Create gradient background
+          const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+          gradient.addColorStop(0, '#2563eb');
+          gradient.addColorStop(1, '#4f46e5');
+          ctx.fillStyle = gradient;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          // Load images
+          const profileImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = URL.createObjectURL(profilePhoto);
+          });
+          
+          const logoImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = URL.createObjectURL(logo);
+          });
+          
+          // Add a circular profile image
+          const profileSize = 250;
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(250, canvas.height / 2, profileSize / 2, 0, Math.PI * 2);
+          ctx.clip();
+          ctx.drawImage(profileImg, 250 - profileSize / 2, canvas.height / 2 - profileSize / 2, profileSize, profileSize);
+          ctx.restore();
+          
+          // Add company logo
+          const logoSize = 160;
+          ctx.drawImage(logoImg, canvas.width - logoSize - 100, canvas.height / 2 - logoSize / 2, logoSize, logoSize);
+          
+          // Add text
+          ctx.font = 'bold 40px Arial';
+          ctx.fillStyle = 'white';
+          ctx.textAlign = 'center';
+          ctx.fillText('Professional | Creative | Innovative', canvas.width / 2, canvas.height / 2);
+          
+          return {
+            id: 'banner-2',
+            url: canvas.toDataURL('image/png'),
+            type: 'banner' as const,
+            name: 'Modern LinkedIn Banner'
+          };
+        })()
       ];
-
-      clearInterval(progressInterval);
+      
+      // Wait for all images to be generated
+      const results = await Promise.all([...profilePromises, ...bannerPromises]);
+      
+      // Filter out any failed generations (null values)
+      generatedImages.push(...results.filter(Boolean) as GeneratedImage[]);
+      
       setProgress(100);
+      clearInterval(progressInterval);
       
       // Short delay before completing
       setTimeout(() => {
